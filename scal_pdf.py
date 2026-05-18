@@ -1,4 +1,5 @@
 from pathlib import Path
+from datetime import date
 import sys
 import re
 import traceback
@@ -45,7 +46,12 @@ def main():
 
     output_dir = base_dir / "pdf-calosc"
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_file = output_dir / pdf_files[0].name
+
+    date_stamp = date.today().strftime("%y%m%d")
+    base_stem = pdf_files[0].stem
+    name_suffix = f"-0000_cale opracowanie_{date_stamp}-v01"
+    output_file = output_dir / f"{base_stem}{name_suffix}.pdf"
+    podp_file = output_dir / f"{base_stem}{name_suffix}-podpis.pdf"
 
     merged = pikepdf.Pdf.new()
 
@@ -67,14 +73,13 @@ def main():
         _fatal("\nBłąd podczas zapisu wynikowego PDF", e, code=1)
 
     try:
-        podp_file = output_dir / f"{output_file.stem}-podp{output_file.suffix}"
         shutil.copy2(output_file, podp_file)
     except Exception as e:
-        _fatal("\nBłąd podczas kopiowania pliku '-podp' do 'pdf-calosc'", e, code=1)
+        _fatal("\nBłąd podczas kopiowania pliku '-podpis' do 'pdf-calosc'", e, code=1)
 
     print("\nGotowe!")
     print(f"Utworzono:\n{output_file}")
-    print(f"Utworzono kopię '-podp' w 'pdf-calosc':\n{podp_file}")
+    print(f"Utworzono kopię '-podpis' w 'pdf-calosc':\n{podp_file}")
 
     _pause_exit(0)
 
