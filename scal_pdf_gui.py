@@ -74,7 +74,8 @@ class App:
         side.pack(side=tk.RIGHT, fill=tk.Y, padx=(8, 0))
         tk.Button(side, text="Góra", width=10, command=lambda: self._move(-1)).pack(fill=tk.X, pady=(0, 4))
         tk.Button(side, text="Dół", width=10, command=lambda: self._move(1)).pack(fill=tk.X, pady=(0, 4))
-        tk.Button(side, text="Usuń", width=10, command=self._remove).pack(fill=tk.X)
+        tk.Button(side, text="Usuń", width=10, command=self._remove).pack(fill=tk.X, pady=(0, 12))
+        tk.Button(side, text="Wyczyść", width=10, command=self._clear).pack(fill=tk.X)
 
         bottom = tk.Frame(outer)
         bottom.pack(fill=tk.X, pady=(10, 0))
@@ -181,6 +182,12 @@ class App:
         self._refresh_path()
         if self.files:
             self._select(min(index, len(self.files) - 1))
+
+    def _clear(self) -> None:
+        self.files.clear()
+        self.default_dir = None
+        self._refresh_list()
+        self._refresh_path()
 
     def _report(self, message: str, exc: BaseException | None = None) -> None:
         log_note = ""
