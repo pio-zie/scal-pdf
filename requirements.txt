@@ -1,1 +1,3 @@
 pikepdf
+tkinterdnd2
+pyinstaller

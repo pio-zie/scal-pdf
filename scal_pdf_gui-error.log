@@ -1,0 +1,11 @@
+Traceback (most recent call last):
+  File "C:\Users\piotr\Documents\Github\scal-pdf\scal_pdf_gui.py", line 251, in _merge_to
+    with pikepdf.open(pdf) as src:
+         ~~~~~~~~~~~~^^^^^
+  File "C:\Users\piotr\Documents\Github\scal-pdf\.venv\Lib\site-packages\pikepdf\_methods.py", line 559, in open
+    pdf = Pdf._open(
+        stream,
+    ...<8 lines>...
+        closing_stream=closing_stream,
+    )
+pikepdf._core.PdfError: C:\Users\piotr\AppData\Local\Temp\scal pdf qmow4vxj\folder dwa\zly.pdf: unable to find trailer dictionary while recovering damaged file
