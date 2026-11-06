@@ -2,10 +2,12 @@ from pathlib import Path
 from datetime import date
 import sys
 import re
-import traceback
 import shutil
+import traceback
 
 import pikepdf
+
+from scal_pdf_raster import DEFAULT_RASTER, _rasterize
 
 base_dir = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).parent
 
@@ -51,35 +53,47 @@ def main():
     base_stem = pdf_files[0].stem
     name_suffix = f"-0000_cale opracowanie_{date_stamp}-v01"
     output_file = output_dir / f"{base_stem}{name_suffix}.pdf"
-    podp_file = output_dir / f"{base_stem}{name_suffix}-podpis.pdf"
+    raster_file = output_dir / f"{base_stem}{name_suffix}-raster.pdf"
+    vector_copy = base_dir / output_file.name
 
     merged = pikepdf.Pdf.new()
+    try:
+        for pdf in pdf_files:
+            print(f"Dodawanie: {pdf.name}")
+            try:
+                with pikepdf.open(pdf) as src:
+                    merged.pages.extend(src.pages)
+            except Exception as e:
+                _fatal(f"\nBłąd podczas dodawania: {pdf.name}", e, code=1)
 
-    for pdf in pdf_files:
-        print(f"Dodawanie: {pdf.name}")
         try:
-            with pikepdf.open(pdf) as src:
-                merged.pages.extend(src.pages)
+            merged.save(
+                output_file,
+                compress_streams=True,
+                object_stream_mode=pikepdf.ObjectStreamMode.generate,
+            )
         except Exception as e:
-            _fatal(f"\nBłąd podczas dodawania: {pdf.name}", e, code=1)
+            _fatal("\nBłąd podczas zapisu wynikowego PDF", e, code=1)
+    finally:
+        merged.close()
 
     try:
-        merged.save(
-            output_file,
-            compress_streams=True,
-            object_stream_mode=pikepdf.ObjectStreamMode.generate,
-        )
+        shutil.copy2(output_file, vector_copy)
     except Exception as e:
-        _fatal("\nBłąd podczas zapisu wynikowego PDF", e, code=1)
+        _fatal("\nBłąd podczas kopiowania scalonego PDF obok programu", e, code=1)
+
+    def _on_page(current: int, total: int) -> None:
+        print(f"Rasteryzacja: strona {current}/{total}", flush=True)
 
     try:
-        shutil.copy2(output_file, podp_file)
+        _rasterize(output_file, raster_file, DEFAULT_RASTER, progress=_on_page)
     except Exception as e:
-        _fatal("\nBłąd podczas kopiowania pliku '-podpis' do 'pdf-calosc'", e, code=1)
+        _fatal("\nBłąd podczas rasteryzacji", e, code=1)
 
     print("\nGotowe!")
     print(f"Utworzono:\n{output_file}")
-    print(f"Utworzono kopię '-podpis' w 'pdf-calosc':\n{podp_file}")
+    print(f"Utworzono raster:\n{raster_file}")
+    print(f"Utworzono kopię obok programu:\n{vector_copy}")
 
     _pause_exit(0)
 

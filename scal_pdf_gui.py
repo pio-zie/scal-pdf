@@ -1,6 +1,5 @@
 from datetime import date
 from pathlib import Path
-import io
 import os
 import queue
 import sys
@@ -11,6 +10,8 @@ from tkinter import filedialog, messagebox
 
 import pikepdf
 from tkinterdnd2 import DND_FILES, TkinterDnD
+
+from scal_pdf_raster import DEFAULT_RASTER, RasterSettings, _rasterize
 
 base_dir = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).parent
 
@@ -31,81 +32,6 @@ def _enable_windows_dpi() -> None:
             pass
 
 
-def _degrade(png_bytes: bytes, rotation: float, blur: float, noise: float) -> bytes:
-    import numpy as np
-    from PIL import Image, ImageFilter
-
-    img = Image.open(io.BytesIO(png_bytes)).convert("RGB")
-
-    if rotation:
-        img = img.rotate(
-            rotation,
-            resample=Image.BICUBIC,
-            expand=False,
-            fillcolor=(255, 255, 255),
-        )
-
-    if blur:
-        img = img.filter(ImageFilter.GaussianBlur(blur))
-
-    if noise:
-        arr = np.asarray(img).astype(np.int16)
-        noise_arr = np.random.normal(0, noise, arr.shape).astype(np.int16)
-        arr = np.clip(arr + noise_arr, 0, 255).astype(np.uint8)
-        img = Image.fromarray(arr)
-
-    buf = io.BytesIO()
-    img.save(buf, format="PNG", optimize=True)
-    return buf.getvalue()
-
-
-def _rasterize(
-    src_path: Path,
-    out_path: Path,
-    dpi: int,
-    rotation: float,
-    blur: float,
-    noise: float,
-    progress=None,
-) -> None:
-    import pymupdf
-
-    src = pymupdf.open(src_path)
-    try:
-        out = pymupdf.open()
-        try:
-            total = src.page_count
-            for index, page in enumerate(src, start=1):
-                if progress is not None:
-                    progress(index, total)
-                pix = page.get_pixmap(dpi=dpi, alpha=False)
-                degraded_png = _degrade(pix.tobytes("png"), rotation, blur, noise)
-                new_page = out.new_page(width=page.rect.width, height=page.rect.height)
-                new_page.insert_image(page.rect, stream=degraded_png)
-
-            # Pusty słownik nic nie czyści; nowy dokument i tak dostaje producer PyMuPDF.
-            out.set_metadata(
-                {
-                    "format": "",
-                    "title": "",
-                    "author": "",
-                    "subject": "",
-                    "keywords": "",
-                    "creator": "",
-                    "producer": "",
-                    "creationDate": "",
-                    "modDate": "",
-                    "trapped": "",
-                }
-            )
-            out.del_xml_metadata()
-            out.save(out_path, garbage=4, deflate=True)
-        finally:
-            out.close()
-    finally:
-        src.close()
-
-
 def _norm(path: Path) -> str:
     try:
         return os.path.normcase(str(path.resolve()))
@@ -122,8 +48,8 @@ class App:
         self._busy = False
 
         root.title("Scal PDF")
-        root.minsize(560, 460)
-        root.geometry("680x520")
+        root.minsize(640, 520)
+        root.geometry("760x580")
         root.protocol("WM_DELETE_WINDOW", self._on_close)
 
         outer = tk.Frame(root, padx=12, pady=12)
@@ -176,16 +102,49 @@ class App:
         params = tk.Frame(raster)
         params.pack(fill=tk.X, pady=(4, 0))
 
-        self.dpi_var = tk.StringVar(value="250")
-        self.angle_var = tk.StringVar(value="0.5")
-        self.blur_var = tk.StringVar(value="0.6")
-        self.noise_var = tk.StringVar(value="4")
+        self.dpi_var = tk.StringVar(value=str(DEFAULT_RASTER.dpi))
+        self.angle_var = tk.StringVar(value=str(DEFAULT_RASTER.angle))
+        self.blur_var = tk.StringVar(value=str(DEFAULT_RASTER.blur))
+        self.noise_var = tk.StringVar(value=str(DEFAULT_RASTER.noise))
+        self.shift_x_var = tk.StringVar(value=str(DEFAULT_RASTER.shift_x_mm))
+        self.shift_y_var = tk.StringVar(value=str(DEFAULT_RASTER.shift_y_mm))
+        self.random_angle_var = tk.BooleanVar(value=DEFAULT_RASTER.random_angle)
+        self.random_shift_var = tk.BooleanVar(value=DEFAULT_RASTER.random_shift)
         self._raster_spins = [
             self._add_spin(params, "DPI", self.dpi_var, 72, 600, 1),
             self._add_spin(params, "Kąt °", self.angle_var, -5, 5, 0.1, "%0.1f"),
-            self._add_spin(params, "Rozmycie", self.blur_var, 0, 3, 0.1, "%0.1f"),
-            self._add_spin(params, "Szum", self.noise_var, 0, 30, 1),
         ]
+        self.random_angle_check = tk.Checkbutton(
+            params,
+            text="Losowy",
+            variable=self.random_angle_var,
+            anchor="w",
+        )
+        self.random_angle_check.pack(side=tk.LEFT, padx=(0, 10))
+        self._raster_spins.extend(
+            [
+                self._add_spin(params, "Rozmycie", self.blur_var, 0, 3, 0.1, "%0.1f"),
+                self._add_spin(params, "Szum", self.noise_var, 0, 30, 1),
+            ]
+        )
+
+        shift_row = tk.Frame(raster)
+        shift_row.pack(fill=tk.X, pady=(4, 0))
+        tk.Label(shift_row, text="Przesunięcie:").pack(side=tk.LEFT, padx=(0, 8))
+        self._raster_spins.extend(
+            [
+                self._add_spin(shift_row, "Poziom [mm]", self.shift_x_var, -5, 5, 0.1, "%0.1f"),
+                self._add_spin(shift_row, "Pion [mm]", self.shift_y_var, -5, 5, 0.1, "%0.1f"),
+            ]
+        )
+        self.random_shift_check = tk.Checkbutton(
+            shift_row,
+            text="Losowo",
+            variable=self.random_shift_var,
+            anchor="w",
+        )
+        self.random_shift_check.pack(side=tk.LEFT)
+        self._raster_checks = [self.random_angle_check, self.random_shift_check]
         self._toggle_raster()
 
         self.status_var = tk.StringVar()
@@ -242,8 +201,8 @@ class App:
         if self._busy:
             return
         state = tk.NORMAL if self.raster_var.get() else tk.DISABLED
-        for spin in self._raster_spins:
-            spin.configure(state=state)
+        for widget in (*self._raster_spins, *self._raster_checks):
+            widget.configure(state=state)
 
     def _on_close(self) -> None:
         if self._busy:
@@ -257,8 +216,8 @@ class App:
         self.close_button.configure(state=state)
         self.raster_check.configure(state=state)
         spin_state = tk.DISABLED if busy or not self.raster_var.get() else tk.NORMAL
-        for spin in self._raster_spins:
-            spin.configure(state=spin_state)
+        for widget in (*self._raster_spins, *self._raster_checks):
+            widget.configure(state=spin_state)
         self.status_var.set(status)
         if status:
             if not self.status_label.winfo_ismapped():
@@ -266,14 +225,16 @@ class App:
         elif self.status_label.winfo_ismapped():
             self.status_label.pack_forget()
 
-    def _read_raster_params(self) -> tuple[int, float, float, float]:
+    def _read_raster_params(self) -> RasterSettings:
         try:
             dpi_raw = float(self.dpi_var.get().strip().replace(",", "."))
             angle = float(self.angle_var.get().strip().replace(",", "."))
             blur = float(self.blur_var.get().strip().replace(",", "."))
             noise = float(self.noise_var.get().strip().replace(",", "."))
+            shift_x = float(self.shift_x_var.get().strip().replace(",", "."))
+            shift_y = float(self.shift_y_var.get().strip().replace(",", "."))
         except ValueError as exc:
-            raise ValueError("Podaj liczby w polach DPI, kąta, rozmycia i szumu.") from exc
+            raise ValueError("Podaj liczby w polach DPI, kąta, rozmycia, szumu i przesunięcia.") from exc
         if not dpi_raw.is_integer():
             raise ValueError("DPI musi być liczbą całkowitą.")
         dpi = int(dpi_raw)
@@ -286,7 +247,18 @@ class App:
             raise ValueError("Rozmycie musi być w zakresie 0–3.")
         if not 0 <= noise <= 30:
             raise ValueError("Szum musi być w zakresie 0–30.")
-        return dpi, angle, blur, noise
+        if not -5 <= shift_x <= 5 or not -5 <= shift_y <= 5:
+            raise ValueError("Przesunięcie w poziomie i pionie musi być w zakresie od -5 do 5 mm.")
+        return RasterSettings(
+            dpi=dpi,
+            angle=angle,
+            blur=blur,
+            noise=noise,
+            random_angle=bool(self.random_angle_var.get()),
+            shift_x_mm=shift_x,
+            shift_y_mm=shift_y,
+            random_shift=bool(self.random_shift_var.get()),
+        )
 
     def _register_drop_tree(self, widget: tk.Misc) -> None:
         try:
@@ -409,7 +381,7 @@ class App:
             return
 
         raster = bool(self.raster_var.get())
-        raster_params: tuple[int, float, float, float] | None = None
+        raster_params: RasterSettings | None = None
         if raster:
             try:
                 raster_params = self._read_raster_params()
@@ -483,9 +455,8 @@ class App:
         self,
         output: Path,
         raster_output: Path,
-        params: tuple[int, float, float, float],
+        params: RasterSettings,
     ) -> None:
-        dpi, angle, blur, noise = params
         self._set_busy(True, "Rasteryzacja: przygotowanie…")
         events: queue.Queue = queue.Queue()
 
@@ -494,7 +465,7 @@ class App:
 
         def worker() -> None:
             try:
-                _rasterize(output, raster_output, dpi, angle, blur, noise, progress=progress)
+                _rasterize(output, raster_output, params, progress=progress)
             except Exception as exc:
                 events.put(("error", exc, traceback.format_exc()))
                 return
